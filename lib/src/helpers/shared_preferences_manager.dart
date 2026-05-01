@@ -12,7 +12,6 @@ class SharedPreferencesManager {
   SharedPreferencesManager._(bool initData) {
     if (initData) {
       getSettings();
-      getAllApiResponses();
     }
   }
 
@@ -47,6 +46,8 @@ class SharedPreferencesManager {
     _apiResponsesCache.insert(0, apiResponse);
 
     final preferences = await SharedPreferences.getInstance();
+
+    // Ağır JSON encode işlemini isolate'e taşıyoruz
     final jsonString = await compute(_encodeResponses, _apiResponsesCache);
     await preferences.setString(_kApiResponses, jsonString);
   }
@@ -58,7 +59,6 @@ class SharedPreferencesManager {
     }
 
     final preferences = await SharedPreferences.getInstance();
-
     final json = preferences.getString(_kApiResponses);
 
     if (json == null) {
@@ -66,6 +66,7 @@ class SharedPreferencesManager {
       return _apiResponsesCache;
     }
 
+    // Ağır JSON decode işlemini isolate'e taşıyoruz
     final list = await compute(_decodeResponses, json);
 
     _apiResponsesCache
@@ -136,17 +137,17 @@ class SharedPreferencesManager {
 
     return apiResponses.firstWhere(
       (api) => api.requestTime.compareTo(time) == 0,
-      orElse: () => apiResponses.first,
+      orElse: () => apiResponses.isNotEmpty ? apiResponses.first : ApiResponse.mock(),
     );
   }
 }
 
-///Top level function to be used with compute
+/// Top-level function for compute (Isolate)
 String _encodeResponses(List<ApiResponse> responses) {
   return jsonEncode(responses);
 }
 
-///Top level function to be used with compute
+/// Top-level function for compute (Isolate)
 List<ApiResponse> _decodeResponses(String json) {
   final list = jsonDecode(json) as List<dynamic>;
   return list.map((item) => ApiResponse.fromJson(item as Map<String, dynamic>)).toList();
