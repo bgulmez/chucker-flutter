@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:chucker_flutter/src/helpers/extensions.dart';
 import 'package:chucker_flutter/src/helpers/shared_preferences_manager.dart';
 import 'package:chucker_flutter/src/localization/localization.dart';
@@ -5,18 +7,18 @@ import 'package:chucker_flutter/src/models/settings.dart';
 import 'package:chucker_flutter/src/view/chucker_page.dart';
 import 'package:chucker_flutter/src/view/helper/chucker_button.dart';
 import 'package:chucker_flutter/src/view/helper/colors.dart';
-import 'package:chucker_flutter/src/view/widgets/notification.dart'
-    as notification;
+import 'package:chucker_flutter/src/view/widgets/notification.dart' as notification;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 ///[ChuckerUiHelper] handles the UI part of `chucker_flutter`
-///
-///You must initialize ChuckerObserver in the `MaterialApp`
-///of your application as it is required to show notification and the screens
-///of `chucker_flutter`
 class ChuckerUiHelper {
   static final List<OverlayEntry?> _overlayEntries = List.empty(growable: true);
+
+  // Bildirim kuyruğu
+  static final Queue<_NotificationData> _notificationQueue = Queue();
+  static int _activeNotifications = 0;
+  static const int _maxVisibleNotifications = 3;
 
   ///Only for testing
   static bool notificationShown = false;
@@ -34,45 +36,57 @@ class ChuckerUiHelper {
   }) {
     notificationShown = false;
 
-    if (!ChuckerUiHelper.settings.showNotification) {
-      debugPrint(
-        '''
-ChuckerFlutter: Your notification setting is off. You can turn it on by visiting the settings page from Chucker Flutter screen.
-        ''',
-      );
-      return false;
-    }
+    if (!ChuckerUiHelper.settings.showNotification) return false;
+
     if (ChuckerFlutter.navigatorObserver.navigator == null) {
-      debugPrint(
-        '''
-ChuckerFlutter: You didn't add ChuckerFlutter.navigatorObserver in your material app. Visit https://github.com/syedmurtaza108/chucker-flutter#getting-started for Chucker Integration details.
-        ''',
-      );
-      return false;
-    }
-    if (!ChuckerFlutter.showNotification) {
-      debugPrint(
-        '''
-ChuckerFlutter: You programmatically vetoed notification behavior. Make sure to remove `ChuckerFlutter.showNotification = true` to continue receiving notifications.
-        ''',
-      );
+      debugPrint('ChuckerFlutter: NavigatorObserver is missing.');
       return false;
     }
 
-    final overlay = ChuckerFlutter.navigatorObserver.navigator!.overlay;
-    final entry = _createOverlayEntry(method, statusCode, path, requestTime);
-    _overlayEntries.add(entry);
-    overlay?.insert(entry);
-    notificationShown = true;
+    // İstekleri kuyruğa ekle
+    _notificationQueue.add(_NotificationData(
+      method: method,
+      statusCode: statusCode,
+      path: path,
+      requestTime: requestTime,
+    ));
+
+    _processQueue();
     return true;
+  }
+
+  static void _processQueue() {
+    if (_activeNotifications >= _maxVisibleNotifications || _notificationQueue.isEmpty) {
+      return;
+    }
+
+    final data = _notificationQueue.removeFirst();
+    final overlay = ChuckerFlutter.navigatorObserver.navigator!.overlay;
+
+    if (overlay == null) return;
+
+    _activeNotifications++;
+
+    late OverlayEntry entry;
+    entry = _createOverlayEntry(data.method, data.statusCode, data.path, data.requestTime, onDismiss: () {
+      entry.remove();
+      _overlayEntries.remove(entry);
+      _activeNotifications--;
+      _processQueue(); // Bir sonraki bildirimi göster
+    });
+
+    _overlayEntries.add(entry);
+    overlay.insert(entry);
+    notificationShown = true;
   }
 
   static OverlayEntry _createOverlayEntry(
     String method,
     int statusCode,
     String path,
-    DateTime requestTime,
-  ) {
+    DateTime requestTime, {
+    required VoidCallback onDismiss,
+  }) {
     return OverlayEntry(
       builder: (context) {
         return Align(
@@ -81,7 +95,7 @@ ChuckerFlutter: You programmatically vetoed notification behavior. Make sure to 
             statusCode: statusCode,
             method: method,
             path: path,
-            removeNotification: _removeNotification,
+            removeNotification: onDismiss,
             requestTime: requestTime,
           ),
         );
@@ -91,15 +105,14 @@ ChuckerFlutter: You programmatically vetoed notification behavior. Make sure to 
 
   static void _removeNotification() {
     for (final entry in _overlayEntries) {
-      if (entry != null) {
-        entry.remove();
-      }
+      entry?.remove();
     }
     _overlayEntries.clear();
+    _activeNotifications = 0;
+    _notificationQueue.clear();
   }
 
   ///[showChuckerScreen] shows the screen containing the list of records
-  ///api requests
   static void showChuckerScreen() {
     SharedPreferencesManager.getInstance().getSettings();
     ChuckerFlutter.navigatorObserver.navigator!.push(
@@ -127,38 +140,31 @@ ChuckerFlutter: You programmatically vetoed notification behavior. Make sure to 
   }
 }
 
-///[ChuckerFlutter] is a helper class to initialize the library
-///
-///[chuckerButton] and notifications only be visible in debug mode
+class _NotificationData {
+  final String method;
+  final int statusCode;
+  final String path;
+  final DateTime requestTime;
+
+  _NotificationData({
+    required this.method,
+    required this.statusCode,
+    required this.path,
+    required this.requestTime,
+  });
+}
+
 class ChuckerFlutter {
-  ///Prevents instantiation; every member on this type is static.
   const ChuckerFlutter._();
-
-  ///[navigatorObserver] observes the navigation of your app. It must be
-  ///referenced in your MaterialApp widget
   static final navigatorObserver = NavigatorObserver();
-
-  ///[showOnRelease] decides whether to allow Chucker Flutter working in release
-  ///mode or not.
-  ///By default its value is `false`
   static bool showOnRelease = false;
-
-  ///[isDebugMode] A wrapper of Flutter's `kDebugMode` constant
   static bool isDebugMode = kDebugMode;
-
-  ///[showNotification] decides whether to show in app notification or not
-  ///By default its value is `true`
   static bool showNotification = true;
+  static final chuckerButton =
+      (isDebugMode || ChuckerFlutter.showOnRelease) ? ChuckerButton.getInstance() : const SizedBox.shrink();
 
-  ///[ChuckerButton] can be placed anywhere in the UI to open Chucker Screen
-  static final chuckerButton = (isDebugMode || ChuckerFlutter.showOnRelease)
-      ? ChuckerButton.getInstance()
-      : const SizedBox.shrink();
-
-  ///[showChuckerScreen] navigates to the chucker home screen
   static void showChuckerScreen() => ChuckerUiHelper.showChuckerScreen();
 
-  ///[ChuckerUiHelper] configuration overlay notification]
   static void configure({
     bool showOnRelease = false,
     bool showNotification = true,

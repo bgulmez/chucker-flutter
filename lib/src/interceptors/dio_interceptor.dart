@@ -27,8 +27,6 @@ class ChuckerDioInterceptor extends Interceptor {
     Response<dynamic> response,
     ResponseInterceptorHandler handler,
   ) async {
-    // await SharedPreferencesManager.getInstance().getSettings();
-
     if (!ChuckerFlutter.isDebugMode && !ChuckerFlutter.showOnRelease) {
       handler.next(response);
       return;
@@ -45,7 +43,8 @@ class ChuckerDioInterceptor extends Interceptor {
       requestTime: _requestTime,
     );
 
-    await _saveResponse(response);
+    // Kayıt işlemini beklemiyoruz, arka planda devam ediyor
+    _saveResponse(response);
 
     log('ChuckerFlutter: $method:$path - $statusCode saved.');
     handler.next(response);
@@ -56,8 +55,6 @@ class ChuckerDioInterceptor extends Interceptor {
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
-    await SharedPreferencesManager.getInstance().getSettings();
-
     if (!ChuckerFlutter.isDebugMode && !ChuckerFlutter.showOnRelease) {
       handler.next(err);
       return;
@@ -72,7 +69,9 @@ class ChuckerDioInterceptor extends Interceptor {
       path: path,
       requestTime: _requestTime,
     );
-    await _saveError(err);
+
+    // Kayıt işlemini beklemiyoruz
+    _saveError(err);
 
     log('ChuckerFlutter: $method:$path - $statusCode saved.');
     handler.next(err);

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:chucker_flutter/chucker_flutter.dart';
 import 'package:dio/dio.dart';
 import 'package:example/chopper/chopper_service.dart';
+import 'package:example/performance_test_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -46,7 +47,7 @@ class TodoPage extends StatefulWidget {
 
 class _TodoPageState extends State<TodoPage> {
   final _baseUrl = 'https://jsonplaceholder.typicode.com';
-  var _clientType = _Client.http;
+  var _clientType = _Client.dio;
 
   late final _dio = Dio(
     BaseOptions(
@@ -256,6 +257,15 @@ class _TodoPageState extends State<TodoPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chucker Flutter Example'),
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PerformanceTestPage()),
+            ),
+            icon: const Icon(Icons.speed),
+          )
+        ],
       ),
       persistentFooterButtons: [
         Text('Using ${_clientType.name} library'),

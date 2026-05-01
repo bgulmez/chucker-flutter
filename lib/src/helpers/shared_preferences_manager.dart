@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:chucker_flutter/src/localization/localization.dart';
@@ -16,9 +17,6 @@ class SharedPreferencesManager {
   }
 
   static SharedPreferencesManager? _sharedPreferencesManager;
-
-  ///[getInstance] returns the singleton object of [SharedPreferencesManager]
-  // ignore: prefer_constructors_over_static_methods
   static SharedPreferencesManager getInstance({bool initData = true}) {
     return _sharedPreferencesManager ??= SharedPreferencesManager._(initData);
   }
@@ -28,35 +26,52 @@ class SharedPreferencesManager {
 
   static final List<ApiResponse> _apiResponsesCache = [];
   static bool _cacheInitialized = false;
+  static Completer<void>? _initCompleter;
+
+  Timer? _debounceTimer;
 
   ///[addApiResponse] sets an API response to local disk
   Future<void> addApiResponse(ApiResponse apiResponse) async {
-    if (ChuckerUiHelper.settings.apiThresholds == 0) {
-      return;
-    }
+    if (ChuckerUiHelper.settings.apiThresholds == 0) return;
 
+    // Aynı anda gelen çoklu isteklerde initialization'ın sadece 1 kez yapılmasını garanti et
     if (!_cacheInitialized) {
-      await getAllApiResponses();
+      if (_initCompleter != null) {
+        await _initCompleter!.future;
+      } else {
+        _initCompleter = Completer<void>();
+        await getAllApiResponses();
+        _initCompleter!.complete();
+        _initCompleter = null;
+      }
     }
 
     if (_apiResponsesCache.length >= ChuckerUiHelper.settings.apiThresholds) {
       _apiResponsesCache.removeLast();
     }
-
     _apiResponsesCache.insert(0, apiResponse);
 
-    final preferences = await SharedPreferences.getInstance();
-
-    // Ağır JSON encode işlemini isolate'e taşıyoruz
-    final jsonString = await compute(_encodeResponses, _apiResponsesCache);
-    await preferences.setString(_kApiResponses, jsonString);
+    // Debounce: 1 saniye boyunca yeni istek gelmezse diske yaz
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 1000), () {
+      _syncToDisk();
+    });
   }
 
-  ///[getAllApiResponses] returns all api responses saved in local disk
-  Future<List<ApiResponse>> getAllApiResponses() async {
-    if (_cacheInitialized) {
-      return _apiResponsesCache;
+  Future<void> _syncToDisk() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      // Cache'in bir kopyasını göndererek thread-safety sağlıyoruz
+      final cacheCopy = List<ApiResponse>.from(_apiResponsesCache);
+      final jsonString = await compute(_encodeResponses, cacheCopy);
+      await preferences.setString(_kApiResponses, jsonString);
+    } catch (e) {
+      debugPrint('Chucker Sync Error: $e');
     }
+  }
+
+  Future<List<ApiResponse>> getAllApiResponses() async {
+    if (_cacheInitialized) return _apiResponsesCache;
 
     final preferences = await SharedPreferences.getInstance();
     final json = preferences.getString(_kApiResponses);
@@ -66,9 +81,7 @@ class SharedPreferencesManager {
       return _apiResponsesCache;
     }
 
-    // Ağır JSON decode işlemini isolate'e taşıyoruz
     final list = await compute(_decodeResponses, json);
-
     _apiResponsesCache
       ..clear()
       ..addAll(list)
@@ -78,63 +91,37 @@ class SharedPreferencesManager {
     return _apiResponsesCache;
   }
 
-  ///[deleteAnApi] deletes an api record from local disk
   Future<void> deleteAnApi(String dateTime) async {
-    final apis = await getAllApiResponses();
-    apis.removeWhere((e) => e.requestTime.toString() == dateTime);
-
-    final preferences = await SharedPreferences.getInstance();
-    final jsonString = await compute(_encodeResponses, apis);
-    await preferences.setString(_kApiResponses, jsonString);
+    _apiResponsesCache.removeWhere((e) => e.requestTime.toString() == dateTime);
+    _syncToDisk();
   }
 
-  ///[deleteSelected] deletes api records from local disk
   Future<void> deleteSelected(List<String> dateTimes) async {
-    final apis = await getAllApiResponses();
-    apis.removeWhere((e) => dateTimes.contains(e.requestTime.toString()));
-
-    final preferences = await SharedPreferences.getInstance();
-    final jsonString = await compute(_encodeResponses, apis);
-    await preferences.setString(_kApiResponses, jsonString);
+    _apiResponsesCache.removeWhere((e) => dateTimes.contains(e.requestTime.toString()));
+    _syncToDisk();
   }
 
-  ///[setSettings] saves the chucker settings in user's disk
   Future<void> setSettings(Settings settings) async {
     final preferences = await SharedPreferences.getInstance();
-
-    await preferences.setString(
-      _kSettings,
-      jsonEncode(settings),
-    );
-
+    await preferences.setString(_kSettings, jsonEncode(settings));
     ChuckerUiHelper.settings = settings;
   }
 
-  ///[getSettings] gets the chucker settings from user's disk
   Future<Settings> getSettings() async {
     final preferences = await SharedPreferences.getInstance();
-
     var settings = Settings.defaultObject();
-
     final jsonString = preferences.getString(_kSettings);
-
-    if (jsonString == null) {
-      return settings;
+    if (jsonString != null) {
+      final json = jsonDecode(jsonString);
+      settings = Settings.fromJson(json as Map<String, dynamic>);
     }
-
-    final json = jsonDecode(jsonString);
-
-    settings = Settings.fromJson(json as Map<String, dynamic>);
-
     ChuckerUiHelper.settings = settings;
     Localization.updateLocalization(ChuckerUiHelper.settings.language);
     return settings;
   }
 
-  ///[getApiResponse] returns single api response at given time
   Future<ApiResponse> getApiResponse(DateTime time) async {
     final apiResponses = await getAllApiResponses();
-
     return apiResponses.firstWhere(
       (api) => api.requestTime.compareTo(time) == 0,
       orElse: () => apiResponses.isNotEmpty ? apiResponses.first : ApiResponse.mock(),
@@ -142,12 +129,7 @@ class SharedPreferencesManager {
   }
 }
 
-/// Top-level function for compute (Isolate)
-String _encodeResponses(List<ApiResponse> responses) {
-  return jsonEncode(responses);
-}
-
-/// Top-level function for compute (Isolate)
+String _encodeResponses(List<ApiResponse> responses) => jsonEncode(responses);
 List<ApiResponse> _decodeResponses(String json) {
   final list = jsonDecode(json) as List<dynamic>;
   return list.map((item) => ApiResponse.fromJson(item as Map<String, dynamic>)).toList();
