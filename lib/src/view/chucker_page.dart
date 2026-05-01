@@ -1,12 +1,14 @@
 import 'package:chucker_flutter/src/helpers/shared_preferences_manager.dart';
 import 'package:chucker_flutter/src/localization/localization.dart';
 import 'package:chucker_flutter/src/models/api_response.dart';
+import 'package:chucker_flutter/src/models/log.dart';
 import 'package:chucker_flutter/src/view/api_detail_page.dart';
 import 'package:chucker_flutter/src/view/helper/chucker_ui_helper.dart';
 import 'package:chucker_flutter/src/view/helper/colors.dart';
 import 'package:chucker_flutter/src/view/helper/http_methods.dart';
 import 'package:chucker_flutter/src/view/settings_page.dart';
 import 'package:chucker_flutter/src/view/tabs/apis_listing.dart';
+import 'package:chucker_flutter/src/view/tabs/logs_listing.dart';
 import 'package:chucker_flutter/src/view/widgets/app_bar.dart';
 import 'package:chucker_flutter/src/view/widgets/confirmation_dialog.dart';
 import 'package:chucker_flutter/src/view/widgets/filter_buttons.dart';
@@ -26,6 +28,7 @@ class _ChuckerPageState extends State<ChuckerPage> {
   var _httpMethod = ChuckerUiHelper.settings.httpMethod;
 
   List<ApiResponse> _apis = List.empty();
+  List<Log> _logs = List.empty();
 
   var _query = '';
 
@@ -40,11 +43,17 @@ class _ChuckerPageState extends State<ChuckerPage> {
       icon: const Icon(Icons.error, color: Colors.white),
       index: 1,
     ),
+    _TabModel(
+      label: 'Logs',
+      icon: const Icon(Icons.list_alt, color: Colors.white),
+      index: 2,
+    ),
   ];
 
   Future<void> _init() async {
     final sharedPreferencesManager = SharedPreferencesManager.getInstance();
     _apis = await sharedPreferencesManager.getAllApiResponses();
+    _logs = await sharedPreferencesManager.getAllLogs();
     setState(() {});
   }
 
@@ -75,14 +84,14 @@ class _ChuckerPageState extends State<ChuckerPage> {
             ),
           ),
           MenuButtons(
-            enableDelete: _selectedApis.isNotEmpty,
+            enableDelete: _selectedApis.isNotEmpty || _logs.isNotEmpty,
             onDelete: _deleteAllSelected,
             onSettings: _openSettings,
           ),
         ],
       ),
       body: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -106,7 +115,9 @@ class _ChuckerPageState extends State<ChuckerPage> {
                       (e) => Tab(
                         text: e.index == 0
                             ? '''${e.label} (${_successApis(filterApply: false).length})'''
-                            : '''${e.label} (${_failedApis(filterApply: false).length})''',
+                            : e.index == 1
+                                ? '''${e.label} (${_failedApis(filterApply: false).length})'''
+                                : '''${e.label} (${_filteredLogs().length})''',
                       ),
                     )
                     .toList(),
@@ -130,6 +141,10 @@ class _ChuckerPageState extends State<ChuckerPage> {
                     onChecked: _selectAnApi,
                     showDelete: _selectedApis.isEmpty,
                     onItemPressed: _openDetails,
+                  ),
+                  LogsListingTabView(
+                    logs: _filteredLogs(),
+                    onDelete: _deleteLog,
                   ),
                 ],
               ),
@@ -180,6 +195,14 @@ class _ChuckerPageState extends State<ChuckerPage> {
     }).toList();
   }
 
+  List<Log> _filteredLogs() {
+    final query = _query.toLowerCase();
+    if (query.isEmpty) return _logs;
+    return _logs
+        .where((log) => log.message.toLowerCase().contains(query) || log.level.name.toLowerCase().contains(query))
+        .toList();
+  }
+
   List<ApiResponse> get _selectedApis => _apis.where((e) => e.checked).toList();
 
   Future<void> _deleteAnApi(String dateTime) async {
@@ -203,6 +226,27 @@ class _ChuckerPageState extends State<ChuckerPage> {
     }
   }
 
+  Future<void> _deleteLog(String dateTime) async {
+    var deleteConfirm = true;
+    if (ChuckerUiHelper.settings.showDeleteConfirmDialog) {
+      deleteConfirm = await showConfirmationDialog(
+            context,
+            title: Localization.strings['singleDeletionTitle']!,
+            message: 'Are you sure you want to delete this log?',
+            yesButtonBackColor: Colors.red,
+            yesButtonForeColor: Colors.white,
+          ) ??
+          false;
+    }
+    if (deleteConfirm) {
+      final sharedPreferencesManager = SharedPreferencesManager.getInstance();
+      await sharedPreferencesManager.deleteLog(dateTime);
+      setState(
+        () => _logs.removeWhere((e) => e.time.toString() == dateTime),
+      );
+    }
+  }
+
   Future<void> _deleteAllSelected() async {
     var deleteConfirm = true;
     if (ChuckerUiHelper.settings.showDeleteConfirmDialog) {
@@ -216,10 +260,7 @@ class _ChuckerPageState extends State<ChuckerPage> {
           false;
     }
     if (deleteConfirm) {
-      final dateTimes = _selectedApis
-          .where((e) => e.checked)
-          .map((e) => e.requestTime.toString())
-          .toList();
+      final dateTimes = _selectedApis.where((e) => e.checked).map((e) => e.requestTime.toString()).toList();
       final sharedPreferencesManager = SharedPreferencesManager.getInstance();
       await sharedPreferencesManager.deleteSelected(dateTimes);
       setState(
@@ -234,9 +275,7 @@ class _ChuckerPageState extends State<ChuckerPage> {
     setState(() {
       _apis = _apis
           .map(
-            (e) => e.requestTime.toString() == dateTime
-                ? e.copyWith(checked: !e.checked)
-                : e,
+            (e) => e.requestTime.toString() == dateTime ? e.copyWith(checked: !e.checked) : e,
           )
           .toList();
     });
@@ -249,6 +288,7 @@ class _ChuckerPageState extends State<ChuckerPage> {
   }
 
   bool? _selectAllCheckState() {
+    if (_apis.isEmpty) return false;
     if (_selectedApis.length == _apis.length) {
       return true;
     } else if (_selectedApis.isNotEmpty) {

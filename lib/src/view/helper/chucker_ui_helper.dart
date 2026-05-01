@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'package:chucker_flutter/src/helpers/extensions.dart';
 import 'package:chucker_flutter/src/helpers/shared_preferences_manager.dart';
 import 'package:chucker_flutter/src/localization/localization.dart';
+import 'package:chucker_flutter/src/models/log.dart';
 import 'package:chucker_flutter/src/models/settings.dart';
 import 'package:chucker_flutter/src/view/chucker_page.dart';
 import 'package:chucker_flutter/src/view/helper/chucker_button.dart';
@@ -15,7 +16,6 @@ import 'package:flutter/material.dart';
 class ChuckerUiHelper {
   static final List<OverlayEntry?> _overlayEntries = List.empty(growable: true);
 
-  // Bildirim kuyruğu
   static final Queue<_NotificationData> _notificationQueue = Queue();
   static int _activeNotifications = 0;
   static const int _maxVisibleNotifications = 3;
@@ -43,7 +43,6 @@ class ChuckerUiHelper {
       return false;
     }
 
-    // İstekleri kuyruğa ekle
     _notificationQueue.add(_NotificationData(
       method: method,
       statusCode: statusCode,
@@ -72,7 +71,7 @@ class ChuckerUiHelper {
       entry.remove();
       _overlayEntries.remove(entry);
       _activeNotifications--;
-      _processQueue(); // Bir sonraki bildirimi göster
+      _processQueue();
     });
 
     _overlayEntries.add(entry);
@@ -180,5 +179,54 @@ class ChuckerFlutter {
       offsetBegin: offsetEnd,
       offsetEnd: offsetBegin,
     );
+  }
+
+  /// [info] logs information
+  static void info(String message) {
+    _log(message, LogLevel.info);
+  }
+
+  /// [debug] logs debug information
+  static void debug(String message) {
+    _log(message, LogLevel.debug);
+  }
+
+  /// [warning] logs warning information
+  static void warning(String message) {
+    _log(message, LogLevel.warning);
+  }
+
+  /// [error] logs error information
+  static void error(String message) {
+    _log(message, LogLevel.error);
+  }
+
+  static void _log(String message, LogLevel level) {
+    if (!isDebugMode && !showOnRelease) return;
+
+    final log = Log(
+      message: message,
+      level: level,
+      time: DateTime.now(),
+    );
+
+    SharedPreferencesManager.getInstance().addLog(log);
+
+    final color = _getLogColor(level);
+    // ignore: avoid_print
+    print('\x1B[${color}m[Chucker] ${level.name.toUpperCase()}: $message\x1B[0m');
+  }
+
+  static String _getLogColor(LogLevel level) {
+    switch (level) {
+      case LogLevel.info:
+        return '32'; // Green
+      case LogLevel.debug:
+        return '34'; // Blue
+      case LogLevel.warning:
+        return '33'; // Yellow
+      case LogLevel.error:
+        return '31'; // Red
+    }
   }
 }
