@@ -60,16 +60,124 @@ class _TodoPageState extends State<TodoPage> {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Headers': '*',
         }),
-  );
+  )..interceptors.add(ChuckerDioInterceptor());
 
   final _chuckerHttpClient = ChuckerHttpClient(http.Client());
-
   final _chopperApiService = ChopperApiService.create();
 
-  @override
-  void initState() {
-    super.initState();
-    _dio.interceptors.add(ChuckerDioInterceptor());
+  Future<void> _handleRequest(Future<dynamic> request) async {
+    try {
+      await request;
+    } catch (e) {
+      // Hataları burada yakalıyoruz ki uygulama kırılmasın.
+      // ChuckerInterceptor zaten kendi içinde hatayı yakalayıp kaydediyor.
+      debugPrint('Chucker Example Error: $e');
+    }
+  }
+
+  Future<void> get({bool error = false}) async {
+    final path = '/post${error ? 'temp' : ''}s/1';
+    switch (_clientType) {
+      case _Client.dio:
+        await _handleRequest(_dio.get('$_baseUrl$path'));
+        break;
+      case _Client.http:
+        await _handleRequest(_chuckerHttpClient.get(Uri.parse('$_baseUrl$path')));
+        break;
+      case _Client.chopper:
+        await _handleRequest(error ? _chopperApiService.getError() : _chopperApiService.get());
+        break;
+    }
+  }
+
+  Future<void> getWithParam() async {
+    const path = '/posts';
+    switch (_clientType) {
+      case _Client.dio:
+        await _handleRequest(_dio.get('$_baseUrl$path', queryParameters: {'userId': '1'}));
+        break;
+      case _Client.http:
+        await _handleRequest(_chuckerHttpClient.get(Uri.parse('$_baseUrl$path?userId=1')));
+        break;
+      case _Client.chopper:
+        await _handleRequest(_chopperApiService.getWithParams());
+        break;
+    }
+  }
+
+  Future<void> post() async {
+    const path = '/posts';
+    final request = {'title': 'foo', 'body': 'bar', 'userId': '101010'};
+    switch (_clientType) {
+      case _Client.dio:
+        await _handleRequest(_dio.post('$_baseUrl$path', data: request));
+        break;
+      case _Client.http:
+        await _handleRequest(_chuckerHttpClient.post(Uri.parse('$_baseUrl$path'), body: jsonEncode(request)));
+        break;
+      case _Client.chopper:
+        await _handleRequest(_chopperApiService.post(request));
+        break;
+    }
+  }
+
+  Future<void> put() async {
+    const path = '/posts/1';
+    final request = {'title': 'PUT foo', 'body': 'PUT bar', 'userId': '101010'};
+    switch (_clientType) {
+      case _Client.dio:
+        await _handleRequest(_dio.put('$_baseUrl$path', data: request));
+        break;
+      case _Client.http:
+        await _handleRequest(_chuckerHttpClient.put(Uri.parse('$_baseUrl$path'), body: request));
+        break;
+      case _Client.chopper:
+        await _handleRequest(_chopperApiService.put(request));
+        break;
+    }
+  }
+
+  Future<void> delete() async {
+    const path = '/posts/1';
+    switch (_clientType) {
+      case _Client.dio:
+        await _handleRequest(_dio.delete('$_baseUrl$path'));
+        break;
+      case _Client.http:
+        await _handleRequest(_chuckerHttpClient.delete(Uri.parse('$_baseUrl$path')));
+        break;
+      case _Client.chopper:
+        await _handleRequest(_chopperApiService.delete());
+        break;
+    }
+  }
+
+  Future<void> patch() async {
+    const path = '/posts/1';
+    final request = {'title': 'PATCH foo'};
+    switch (_clientType) {
+      case _Client.dio:
+        await _handleRequest(_dio.patch('$_baseUrl$path', data: request));
+        break;
+      case _Client.http:
+        await _handleRequest(_chuckerHttpClient.patch(Uri.parse('$_baseUrl$path'), body: request));
+        break;
+      case _Client.chopper:
+        await _handleRequest(_chopperApiService.patch(request));
+        break;
+    }
+  }
+
+  Future<void> uploadImage() async {
+    try {
+      final formData = FormData.fromMap({
+        "key": "6d207e02198a847aa98d0a2a901485a5",
+        "source": await MultipartFile.fromFile('assets/logo.png'),
+      });
+      await _handleRequest(_dio.post('https://freeimage.host/api/1/upload', data: formData));
+    } catch (e) {
+      debugPrint(e.toString());
+    }
   }
 
   @override
@@ -80,29 +188,56 @@ class _TodoPageState extends State<TodoPage> {
         actions: [
           IconButton(
             tooltip: 'Logger Test',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const LoggerTestPage()),
-            ),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoggerTestPage())),
             icon: const Icon(Icons.logo_dev),
           ),
           IconButton(
             tooltip: 'Performance Test',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const PerformanceTestPage()),
-            ),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PerformanceTestPage())),
             icon: const Icon(Icons.speed),
           )
         ],
       ),
-      body: Center(
+      persistentFooterButtons: [
+        Text('Using ${_clientType.name.toUpperCase()}'),
+        const SizedBox(width: 16),
+        ElevatedButton(
+          onPressed: () {
+            setState(() {
+              _clientType = _Client.values[(_clientType.index + 1) % _Client.values.length];
+            });
+          },
+          child: const Text('Switch Client'),
+        )
+      ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ChuckerFlutter.chuckerButton,
-            const SizedBox(height: 20),
-            const Text('Click the icons in AppBar to test features'),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: get, child: const Text('GET')),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: getWithParam, child: const Text('GET WITH PARAMS')),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: post, child: const Text('POST')),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: put, child: const Text('PUT')),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: delete, child: const Text('DELETE')),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: patch, child: const Text('PATCH')),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () => get(error: true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              child: const Text('ERROR (404 Test)'),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: uploadImage, child: const Text('UPLOAD IMAGE')),
+            const SizedBox(height: 16),
+            Image.asset('assets/logo.png', height: 100),
           ],
         ),
       ),
@@ -110,8 +245,4 @@ class _TodoPageState extends State<TodoPage> {
   }
 }
 
-enum _Client {
-  dio,
-  http,
-  chopper,
-}
+enum _Client { dio, http, chopper }

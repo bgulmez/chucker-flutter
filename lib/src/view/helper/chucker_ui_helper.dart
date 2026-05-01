@@ -181,22 +181,27 @@ class ChuckerFlutter {
     );
   }
 
-  /// [info] logs information
+  /// [success] logs success information (Green in console)
+  static void success(String message) {
+    _log(message, LogLevel.info); // info uses green
+  }
+
+  /// [info] logs information (Green in console)
   static void info(String message) {
     _log(message, LogLevel.info);
   }
 
-  /// [debug] logs debug information
+  /// [debug] logs debug information (Blue in console)
   static void debug(String message) {
     _log(message, LogLevel.debug);
   }
 
-  /// [warning] logs warning information
+  /// [warning] logs warning information (Yellow in console)
   static void warning(String message) {
     _log(message, LogLevel.warning);
   }
 
-  /// [error] logs error information
+  /// [error] logs error information (Red in console)
   static void error(String message) {
     _log(message, LogLevel.error);
   }
