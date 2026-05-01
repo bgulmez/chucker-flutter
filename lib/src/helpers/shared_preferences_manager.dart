@@ -25,8 +25,9 @@ class SharedPreferencesManager {
   static const String _kSettings = 'chucker_settings';
 
   static final List<ApiResponse> _apiResponsesCache = [];
+  static final List<ApiResponse> _tempBuffer = [];
   static bool _cacheInitialized = false;
-  static Completer<void>? _initCompleter;
+  static bool _isInitializing = false;
 
   Timer? _debounceTimer;
 
@@ -34,24 +35,28 @@ class SharedPreferencesManager {
   Future<void> addApiResponse(ApiResponse apiResponse) async {
     if (ChuckerUiHelper.settings.apiThresholds == 0) return;
 
-    // Aynı anda gelen çoklu isteklerde initialization'ın sadece 1 kez yapılmasını garanti et
+    // Eğer cache henüz hazır değilse, isteği geçici belleğe al ve init başlat
     if (!_cacheInitialized) {
-      if (_initCompleter != null) {
-        await _initCompleter!.future;
-      } else {
-        _initCompleter = Completer<void>();
-        await getAllApiResponses();
-        _initCompleter!.complete();
-        _initCompleter = null;
+      _tempBuffer.add(apiResponse);
+      if (!_isInitializing) {
+        _isInitializing = true;
+        getAllApiResponses(); // Arka planda başlasın, bekleme yapmasın
       }
+      return;
     }
 
+    _addToCache(apiResponse);
+    _scheduleSync();
+  }
+
+  void _addToCache(ApiResponse apiResponse) {
     if (_apiResponsesCache.length >= ChuckerUiHelper.settings.apiThresholds) {
       _apiResponsesCache.removeLast();
     }
     _apiResponsesCache.insert(0, apiResponse);
+  }
 
-    // Debounce: 1 saniye boyunca yeni istek gelmezse diske yaz
+  void _scheduleSync() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 1000), () {
       _syncToDisk();
@@ -61,7 +66,6 @@ class SharedPreferencesManager {
   Future<void> _syncToDisk() async {
     try {
       final preferences = await SharedPreferences.getInstance();
-      // Cache'in bir kopyasını göndererek thread-safety sağlıyoruz
       final cacheCopy = List<ApiResponse>.from(_apiResponsesCache);
       final jsonString = await compute(_encodeResponses, cacheCopy);
       await preferences.setString(_kApiResponses, jsonString);
@@ -76,29 +80,40 @@ class SharedPreferencesManager {
     final preferences = await SharedPreferences.getInstance();
     final json = preferences.getString(_kApiResponses);
 
-    if (json == null) {
-      _cacheInitialized = true;
-      return _apiResponsesCache;
+    if (json != null) {
+      try {
+        final list = await compute(_decodeResponses, json);
+        _apiResponsesCache
+          ..clear()
+          ..addAll(list);
+      } catch (e) {
+        debugPrint('Chucker Load Error: $e');
+      }
     }
 
-    final list = await compute(_decodeResponses, json);
-    _apiResponsesCache
-      ..clear()
-      ..addAll(list)
-      ..sort((a, b) => b.requestTime.compareTo(a.requestTime));
+    // Geçici bellekteki (init sırasında gelen) istekleri asıl cache'e aktar
+    if (_tempBuffer.isNotEmpty) {
+      for (final api in _tempBuffer.reversed) {
+        _addToCache(api);
+      }
+      _tempBuffer.clear();
+      _scheduleSync();
+    }
 
+    _apiResponsesCache.sort((a, b) => b.requestTime.compareTo(a.requestTime));
     _cacheInitialized = true;
+    _isInitializing = false;
     return _apiResponsesCache;
   }
 
   Future<void> deleteAnApi(String dateTime) async {
     _apiResponsesCache.removeWhere((e) => e.requestTime.toString() == dateTime);
-    _syncToDisk();
+    _scheduleSync();
   }
 
   Future<void> deleteSelected(List<String> dateTimes) async {
     _apiResponsesCache.removeWhere((e) => dateTimes.contains(e.requestTime.toString()));
-    _syncToDisk();
+    _scheduleSync();
   }
 
   Future<void> setSettings(Settings settings) async {
