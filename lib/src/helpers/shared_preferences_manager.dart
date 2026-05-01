@@ -4,6 +4,7 @@ import 'package:chucker_flutter/src/localization/localization.dart';
 import 'package:chucker_flutter/src/models/api_response.dart';
 import 'package:chucker_flutter/src/models/settings.dart';
 import 'package:chucker_flutter/src/view/helper/chucker_ui_helper.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 ///[SharedPreferencesManager] handles storage of chucker data on user's disk
@@ -11,6 +12,7 @@ class SharedPreferencesManager {
   SharedPreferencesManager._(bool initData) {
     if (initData) {
       getSettings();
+      getAllApiResponses();
     }
   }
 
@@ -25,50 +27,54 @@ class SharedPreferencesManager {
   static const String _kApiResponses = 'api_responses';
   static const String _kSettings = 'chucker_settings';
 
+  static final List<ApiResponse> _apiResponsesCache = [];
+  static bool _cacheInitialized = false;
+
   ///[addApiResponse] sets an API response to local disk
   Future<void> addApiResponse(ApiResponse apiResponse) async {
     if (ChuckerUiHelper.settings.apiThresholds == 0) {
       return;
     }
-    final newResponses = List<ApiResponse>.empty(growable: true);
 
-    final previousResponses = await getAllApiResponses();
-
-    if (previousResponses.length == ChuckerUiHelper.settings.apiThresholds) {
-      previousResponses.removeAt(previousResponses.length - 1);
+    if (!_cacheInitialized) {
+      await getAllApiResponses();
     }
 
-    newResponses
-      ..addAll(previousResponses)
-      ..add(apiResponse);
+    if (_apiResponsesCache.length >= ChuckerUiHelper.settings.apiThresholds) {
+      _apiResponsesCache.removeLast();
+    }
+
+    _apiResponsesCache.insert(0, apiResponse);
 
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(
-      _kApiResponses,
-      jsonEncode(newResponses),
-    );
+    final jsonString = await compute(_encodeResponses, _apiResponsesCache);
+    await preferences.setString(_kApiResponses, jsonString);
   }
 
   ///[getAllApiResponses] returns all api responses saved in local disk
   Future<List<ApiResponse>> getAllApiResponses() async {
-    final apiResponses = List<ApiResponse>.empty(growable: true);
+    if (_cacheInitialized) {
+      return _apiResponsesCache;
+    }
 
     final preferences = await SharedPreferences.getInstance();
 
     final json = preferences.getString(_kApiResponses);
 
     if (json == null) {
-      return apiResponses;
+      _cacheInitialized = true;
+      return _apiResponsesCache;
     }
 
-    final list = jsonDecode(json) as List<dynamic>;
+    final list = await compute(_decodeResponses, json);
 
-    for (final item in list) {
-      apiResponses.add(ApiResponse.fromJson(item as Map<String, dynamic>));
-    }
+    _apiResponsesCache
+      ..clear()
+      ..addAll(list)
+      ..sort((a, b) => b.requestTime.compareTo(a.requestTime));
 
-    apiResponses.sort((a, b) => b.requestTime.compareTo(a.requestTime));
-    return apiResponses;
+    _cacheInitialized = true;
+    return _apiResponsesCache;
   }
 
   ///[deleteAnApi] deletes an api record from local disk
@@ -77,24 +83,18 @@ class SharedPreferencesManager {
     apis.removeWhere((e) => e.requestTime.toString() == dateTime);
 
     final preferences = await SharedPreferences.getInstance();
-
-    await preferences.setString(
-      _kApiResponses,
-      jsonEncode(apis),
-    );
+    final jsonString = await compute(_encodeResponses, apis);
+    await preferences.setString(_kApiResponses, jsonString);
   }
 
-  ///[deleteAnApi] deletes an api record from local disk
+  ///[deleteSelected] deletes api records from local disk
   Future<void> deleteSelected(List<String> dateTimes) async {
     final apis = await getAllApiResponses();
     apis.removeWhere((e) => dateTimes.contains(e.requestTime.toString()));
 
     final preferences = await SharedPreferences.getInstance();
-
-    await preferences.setString(
-      _kApiResponses,
-      jsonEncode(apis),
-    );
+    final jsonString = await compute(_encodeResponses, apis);
+    await preferences.setString(_kApiResponses, jsonString);
   }
 
   ///[setSettings] saves the chucker settings in user's disk
@@ -130,27 +130,24 @@ class SharedPreferencesManager {
     return settings;
   }
 
-  ///[getAllApiResponses] returns single api response at given time
+  ///[getApiResponse] returns single api response at given time
   Future<ApiResponse> getApiResponse(DateTime time) async {
-    final apiResponses = List<ApiResponse>.empty(growable: true);
-
-    final preferences = await SharedPreferences.getInstance();
-
-    final json = preferences.getString(_kApiResponses);
-
-    if (json == null) {
-      return ApiResponse.mock();
-    }
-
-    final list = jsonDecode(json) as List<dynamic>;
-
-    for (final item in list) {
-      apiResponses.add(ApiResponse.fromJson(item as Map<String, dynamic>));
-    }
+    final apiResponses = await getAllApiResponses();
 
     return apiResponses.firstWhere(
       (api) => api.requestTime.compareTo(time) == 0,
       orElse: () => apiResponses.first,
     );
   }
+}
+
+///Top level function to be used with compute
+String _encodeResponses(List<ApiResponse> responses) {
+  return jsonEncode(responses);
+}
+
+///Top level function to be used with compute
+List<ApiResponse> _decodeResponses(String json) {
+  final list = jsonDecode(json) as List<dynamic>;
+  return list.map((item) => ApiResponse.fromJson(item as Map<String, dynamic>)).toList();
 }

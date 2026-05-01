@@ -27,7 +27,7 @@ class ChuckerDioInterceptor extends Interceptor {
     Response<dynamic> response,
     ResponseInterceptorHandler handler,
   ) async {
-    await SharedPreferencesManager.getInstance().getSettings();
+    // await SharedPreferencesManager.getInstance().getSettings();
 
     if (!ChuckerFlutter.isDebugMode && !ChuckerFlutter.showOnRelease) {
       handler.next(response);
@@ -86,15 +86,12 @@ class ChuckerDioInterceptor extends Interceptor {
         baseUrl: response.requestOptions.baseUrl,
         method: response.requestOptions.method,
         statusCode: response.statusCode ?? -1,
-        connectionTimeout:
-            response.requestOptions.connectTimeout?.inMilliseconds ?? 0,
+        connectionTimeout: response.requestOptions.connectTimeout?.inMilliseconds ?? 0,
         contentType: response.requestOptions.contentType,
         headers: response.requestOptions.headers.cast<String, dynamic>(),
         responseHeaders: response.headers.map.cast<String, dynamic>(),
-        queryParameters:
-            response.requestOptions.queryParameters.cast<String, dynamic>(),
-        receiveTimeout:
-            response.requestOptions.receiveTimeout?.inMilliseconds ?? 0,
+        queryParameters: response.requestOptions.queryParameters.cast<String, dynamic>(),
+        receiveTimeout: response.requestOptions.receiveTimeout?.inMilliseconds ?? 0,
         request: _separateFileObjects(response.requestOptions).data,
         requestSize: 2,
         requestTime: _requestTime,
@@ -124,15 +121,12 @@ class ChuckerDioInterceptor extends Interceptor {
         baseUrl: response.requestOptions.baseUrl,
         method: response.requestOptions.method,
         statusCode: response.response?.statusCode ?? -1,
-        connectionTimeout:
-            response.requestOptions.connectTimeout?.inMilliseconds ?? 0,
+        connectionTimeout: response.requestOptions.connectTimeout?.inMilliseconds ?? 0,
         contentType: response.requestOptions.contentType,
         headers: response.requestOptions.headers.cast<String, dynamic>(),
         responseHeaders: {},
-        queryParameters:
-            response.requestOptions.queryParameters.cast<String, dynamic>(),
-        receiveTimeout:
-            response.requestOptions.receiveTimeout?.inMilliseconds ?? 0,
+        queryParameters: response.requestOptions.queryParameters.cast<String, dynamic>(),
+        receiveTimeout: response.requestOptions.receiveTimeout?.inMilliseconds ?? 0,
         request: _separateFileObjects(response.requestOptions).data,
         requestSize: 2,
         requestTime: _requestTime,
